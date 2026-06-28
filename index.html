@@ -6,12 +6,12 @@
   <style>
     body { 
       margin: 0; 
-      overflow: hidden; /* ป้องกันการเลื่อนหน้าจอ */
+      overflow: hidden; 
       background-color: #000; 
       font-family: sans-serif;
     }
     .input_video { 
-      display: none; /* ซ่อนวิดีโอจากกล้อง เพราะเราจะดูแค่ 3D */
+      display: none; /* ซ่อนวิดีโอจากกล้อง เพื่อดูแค่ฉาก 3 มิติ */
     }
     #canvas-container { 
       width: 100vw; 
@@ -22,34 +22,49 @@
       top: 50%; 
       left: 50%; 
       transform: translate(-50%, -50%); 
-      color: #00FF00; 
+      color: #00aaff; 
       font-size: 1.5rem; 
       text-align: center;
       z-index: 10;
+      background: rgba(0,0,0,0.7);
+      padding: 20px;
+      border-radius: 10px;
+      border: 1px solid #00aaff;
+    }
+    #instructions {
+      position: absolute;
+      bottom: 20px;
+      width: 100%;
+      text-align: center;
+      color: white;
+      font-size: 1.2rem;
+      pointer-events: none;
     }
   </style>
   
-  <!-- โหลด MediaPipe สำหรับจับมือ -->
+  <!-- โหลด MediaPipe -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
   
-  <!-- โหลด Three.js สำหรับสร้าง 3D -->
+  <!-- โหลด Three.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
-  <div id="loading">กำลังโหลดโมเดลอวกาศและ AI...<br><span style="font-size: 1rem; color: #fff;">(กรุณาอนุญาตให้ใช้งานกล้อง)</span></div>
+  <div id="loading">กำลังโหลดระบบอวกาศและเชื่อมต่อกล้อง...<br><span style="font-size: 1rem; color: #ccc;">(กรุณากดอนุญาตให้ใช้งานกล้อง)</span></div>
+  <div id="instructions">ใช้ท่าทาง "จีบนิ้วชี้และนิ้วโป้งเข้าหากัน" หรือ "ถ่างนิ้วออก" เพื่อซูมเข้า-ออก</div>
+  
   <video class="input_video"></video>
   <div id="canvas-container"></div>
 
   <script>
-    // ==========================================
-    // ส่วนที่ 1: ตั้งค่าอวกาศ 3 มิติ (Three.js)
-    // ==========================================
+    // ---------------------------------------------------------
+    // 1. การสร้างฉาก 3 มิติ (โลกและดวงดาว)
+    // ---------------------------------------------------------
     const container = document.getElementById('canvas-container');
     const scene = new THREE.Scene();
     
-    // สร้างกล้อง 3 มิติ
+    // ตั้งค่ากล้อง 3 มิติ
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -58,17 +73,16 @@
     // สร้างลูกโลก
     const geometry = new THREE.SphereGeometry(2, 64, 64);
     const textureLoader = new THREE.TextureLoader();
-    // ดึงภาพแผนที่โลกมาแปะบนลูกทรงกลม
     const earthTexture = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg');
     const material = new THREE.MeshBasicMaterial({ map: earthTexture });
     const globe = new THREE.Mesh(geometry, material);
     scene.add(globe);
 
-    // สร้างดวงดาวพื้นหลัง (Galaxy)
+    // สร้างดวงดาว (Galaxy)
     const starsGeometry = new THREE.BufferGeometry();
     const starsMaterial = new THREE.PointsMaterial({color: 0xFFFFFF, size: 0.05});
     const starsVertices = [];
-    for(let i = 0; i < 2000; i++) {
+    for(let i = 0; i < 3000; i++) {
         const x = (Math.random() - 0.5) * 100;
         const y = (Math.random() - 0.5) * 100;
         const z = (Math.random() - 0.5) * 100;
@@ -78,51 +92,50 @@
     const starField = new THREE.Points(starsGeometry, starsMaterial);
     scene.add(starField);
 
-    // ค่าเริ่มต้นของการซูม (ระยะห่างกล้อง)
+    // ตั้งค่าระยะเริ่มต้น
     let targetZoom = 6;
     camera.position.z = targetZoom;
 
-    // ฟังก์ชันสั่งให้โลกและอวกาศหมุนตลอดเวลา
+    // ทำให้ลูกโลกหมุนตลอดเวลา
     function animate() {
       requestAnimationFrame(animate);
       globe.rotation.y += 0.002;
       starField.rotation.y -= 0.0005;
       
-      // ทำให้การซูมสมูทขึ้น (Lerp)
+      // อัปเดตกล้องให้ซูมแบบนุ่มนวล
       camera.position.z += (targetZoom - camera.position.z) * 0.1;
       
       renderer.render(scene, camera);
     }
     animate();
 
-    // ==========================================
-    // ส่วนที่ 2: ตั้งค่าจับการเคลื่อนไหวมือ (MediaPipe)
-    // ==========================================
+    // ---------------------------------------------------------
+    // 2. การจับความเคลื่อนไหวของมือ
+    // ---------------------------------------------------------
     const videoElement = document.querySelector('.input_video');
     const loadingText = document.getElementById('loading');
 
     function onResults(results) {
-      // ซ่อนข้อความโหลดเมื่อกล้องและ AI ทำงานแล้ว
+      // ซ่อนข้อความดาวน์โหลดเมื่อระบบพร้อม
       loadingText.style.display = 'none';
 
-      // ถ้าจับมือได้
+      // หากตรวจพบมือ
       if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
         const landmarks = results.multiHandLandmarks[0];
         
-        // ดึงตำแหน่ง ปลายนิ้วโป้ง (จุดที่ 4) และ ปลายนิ้วชี้ (จุดที่ 8)
+        // จุดที่ 4 คือปลายนิ้วโป้ง, จุดที่ 8 คือปลายนิ้วชี้
         const thumbTip = landmarks[4];
         const indexTip = landmarks[8];
 
-        // คำนวณระยะห่างระหว่างนิ้ว
+        // คำนวณระยะห่าง
         const dx = thumbTip.x - indexTip.x;
         const dy = thumbTip.y - indexTip.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        // แปลงระยะห่างนิ้วเป็นการซูม 
-        // distance ปกติจะมีค่า 0.0 (จีบนิ้วชิดกัน) ถึงประมาณ 0.3 (ถ่างนิ้วสุด)
-        let newZoom = 12 - (distance * 35); 
+        // แปลงระยะห่างของนิ้ว เป็นระยะการซูมของกล้อง (ระยะนิ้วปกติจะอยู่ระหว่าง 0.0 ถึง 0.3)
+        let newZoom = 10 - (distance * 30); 
         
-        // ล็อกระยะซูมไม่ให้ทะลุโลก หรือไกลเกินไป
+        // ล็อกไม่ให้ซูมใกล้เกินไป หรือไกลเกินไป
         if (newZoom < 2.5) newZoom = 2.5; 
         if (newZoom > 12) newZoom = 12;
         
@@ -130,18 +143,20 @@
       }
     }
 
+    // ตั้งค่า AI
     const hands = new Hands({locateFile: (file) => {
       return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
     }});
     
     hands.setOptions({
-      maxNumHands: 1, // ใช้มือเดียวสั่งการ
+      maxNumHands: 1, 
       modelComplexity: 1,
       minDetectionConfidence: 0.6,
       minTrackingConfidence: 0.6
     });
     hands.onResults(onResults);
 
+    // เปิดกล้อง
     const cameraFeed = new Camera(videoElement, {
       onFrame: async () => {
         await hands.send({image: videoElement});
