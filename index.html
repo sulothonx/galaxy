@@ -1,170 +1,169 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-  <meta charset="UTF-8">
-  <title>3D Hand Tracking Globe</title>
-  <style>
-    body { 
-      margin: 0; 
-      overflow: hidden; 
-      background-color: #000; 
-      font-family: sans-serif;
-    }
-    .input_video { 
-      display: none; /* ซ่อนวิดีโอจากกล้อง เพื่อดูแค่ฉาก 3 มิติ */
-    }
-    #canvas-container { 
-      width: 100vw; 
-      height: 100vh; 
-    }
-    #loading { 
-      position: absolute; 
-      top: 50%; 
-      left: 50%; 
-      transform: translate(-50%, -50%); 
-      color: #00aaff; 
-      font-size: 1.5rem; 
-      text-align: center;
-      z-index: 10;
-      background: rgba(0,0,0,0.7);
-      padding: 20px;
-      border-radius: 10px;
-      border: 1px solid #00aaff;
-    }
-    #instructions {
-      position: absolute;
-      bottom: 20px;
-      width: 100%;
-      text-align: center;
-      color: white;
-      font-size: 1.2rem;
-      pointer-events: none;
-    }
-  </style>
-  
-  <!-- โหลด MediaPipe -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-  
-  <!-- โหลด Three.js -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Interactive Earth with Hand Tracking</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+        /* ซ่อนวิดีโอต้นฉบับ เพราะเราจะโชว์แค่ 3D Canvas */
+        #input_video { display: none; }
+        #status {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: sans-serif;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 5px;
+        }
+    </style>
+    
+    <!-- โหลด Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- โหลด MediaPipe Hands -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 </head>
 <body>
+    <div id="status">กำลังโหลดกล้องและโมเดล...</div>
+    <video id="input_video"></video>
+    <div id="canvas-container"></div>
 
-  <div id="loading">กำลังโหลดระบบอวกาศและเชื่อมต่อกล้อง...<br><span style="font-size: 1rem; color: #ccc;">(กรุณากดอนุญาตให้ใช้งานกล้อง)</span></div>
-  <div id="instructions">ใช้ท่าทาง "จีบนิ้วชี้และนิ้วโป้งเข้าหากัน" หรือ "ถ่างนิ้วออก" เพื่อซูมเข้า-ออก</div>
-  
-  <video class="input_video"></video>
-  <div id="canvas-container"></div>
+    <script>
+        // ==========================================
+        // 1. ตั้งค่า Three.js (สร้างลูกโลก 3D)
+        // ==========================================
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-  <script>
-    // ---------------------------------------------------------
-    // 1. การสร้างฉาก 3 มิติ (โลกและดวงดาว)
-    // ---------------------------------------------------------
-    const container = document.getElementById('canvas-container');
-    const scene = new THREE.Scene();
-    
-    // ตั้งค่ากล้อง 3 มิติ
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    container.appendChild(renderer.domElement);
+        // สร้างรูปทรงกลมและใส่ Texture แผนที่โลก
+        const geometry = new THREE.SphereGeometry(2, 64, 64);
+        const textureLoader = new THREE.TextureLoader();
+        // ใช้ภาพแผนที่โลกแบบฟรีจากอินเทอร์เน็ต
+        const earthTexture = textureLoader.load('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg');
+        const material = new THREE.MeshStandardMaterial({ map: earthTexture });
+        const earth = new THREE.Mesh(geometry, material);
+        scene.add(earth);
 
-    // สร้างลูกโลก
-    const geometry = new THREE.SphereGeometry(2, 64, 64);
-    const textureLoader = new THREE.TextureLoader();
-    const earthTexture = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg');
-    const material = new THREE.MeshBasicMaterial({ map: earthTexture });
-    const globe = new THREE.Mesh(geometry, material);
-    scene.add(globe);
+        // เพิ่มแสงสว่าง
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const pointLight = new THREE.PointLight(0xffffff, 1);
+        pointLight.position.set(5, 3, 5);
+        scene.add(pointLight);
 
-    // สร้างดวงดาว (Galaxy)
-    const starsGeometry = new THREE.BufferGeometry();
-    const starsMaterial = new THREE.PointsMaterial({color: 0xFFFFFF, size: 0.05});
-    const starsVertices = [];
-    for(let i = 0; i < 3000; i++) {
-        const x = (Math.random() - 0.5) * 100;
-        const y = (Math.random() - 0.5) * 100;
-        const z = (Math.random() - 0.5) * 100;
-        starsVertices.push(x, y, z);
-    }
-    starsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starsVertices, 3));
-    const starField = new THREE.Points(starsGeometry, starsMaterial);
-    scene.add(starField);
+        camera.position.z = 6;
 
-    // ตั้งค่าระยะเริ่มต้น
-    let targetZoom = 6;
-    camera.position.z = targetZoom;
+        // ==========================================
+        // 2. ตรรกะการควบคุมด้วยมือ (Hand Tracking)
+        // ==========================================
+        let isGrabbing = false;
+        let previousHandPosition = { x: 0, y: 0 };
+        const statusDiv = document.getElementById('status');
 
-    // ทำให้ลูกโลกหมุนตลอดเวลา
-    function animate() {
-      requestAnimationFrame(animate);
-      globe.rotation.y += 0.002;
-      starField.rotation.y -= 0.0005;
-      
-      // อัปเดตกล้องให้ซูมแบบนุ่มนวล
-      camera.position.z += (targetZoom - camera.position.z) * 0.1;
-      
-      renderer.render(scene, camera);
-    }
-    animate();
+        function onResults(results) {
+            statusDiv.innerText = "ตรวจจับมือและพร้อมใช้งาน";
+            
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // ดึงตำแหน่งปลายนิ้วโป้ง (4) และปลายนิ้วชี้ (8)
+                const thumbTip = landmarks[4];
+                const indexTip = landmarks[8];
 
-    // ---------------------------------------------------------
-    // 2. การจับความเคลื่อนไหวของมือ
-    // ---------------------------------------------------------
-    const videoElement = document.querySelector('.input_video');
-    const loadingText = document.getElementById('loading');
+                // คำนวณระยะห่างระหว่างนิ้ว (เพื่อดูว่า "หยิบ" หรือไม่)
+                const distance = Math.sqrt(
+                    Math.pow(thumbTip.x - indexTip.x, 2) + 
+                    Math.pow(thumbTip.y - indexTip.y, 2) +
+                    Math.pow(thumbTip.z - indexTip.z, 2)
+                );
 
-    function onResults(results) {
-      // ซ่อนข้อความดาวน์โหลดเมื่อระบบพร้อม
-      loadingText.style.display = 'none';
+                // ถ้าปลายนิ้วอยู่ใกล้กัน = ท่าทางจับ (Grab)
+                if (distance < 0.05) {
+                    if (!isGrabbing) {
+                        isGrabbing = true;
+                        // บันทึกตำแหน่งเริ่มต้นตอนที่เริ่มหยิบ
+                        previousHandPosition = { x: indexTip.x, y: indexTip.y, z: indexTip.z };
+                    }
 
-      // หากตรวจพบมือ
-      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        const landmarks = results.multiHandLandmarks[0];
-        
-        // จุดที่ 4 คือปลายนิ้วโป้ง, จุดที่ 8 คือปลายนิ้วชี้
-        const thumbTip = landmarks[4];
-        const indexTip = landmarks[8];
+                    // คำนวณการเคลื่อนที่ของมือเพื่อหมุนลูกโลก
+                    const deltaX = indexTip.x - previousHandPosition.x;
+                    const deltaY = indexTip.y - previousHandPosition.y;
 
-        // คำนวณระยะห่าง
-        const dx = thumbTip.x - indexTip.x;
-        const dy = thumbTip.y - indexTip.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
+                    // หมุนลูกโลกตามทิศทางมือ
+                    earth.rotation.y += deltaX * 5;
+                    earth.rotation.x += deltaY * 5;
 
-        // แปลงระยะห่างของนิ้ว เป็นระยะการซูมของกล้อง (ระยะนิ้วปกติจะอยู่ระหว่าง 0.0 ถึง 0.3)
-        let newZoom = 10 - (distance * 30); 
-        
-        // ล็อกไม่ให้ซูมใกล้เกินไป หรือไกลเกินไป
-        if (newZoom < 2.5) newZoom = 2.5; 
-        if (newZoom > 12) newZoom = 12;
-        
-        targetZoom = newZoom;
-      }
-    }
+                    // ใช้แกน Z ของมือในการดึงเข้า/ออก (ซูม)
+                    const deltaZ = indexTip.z - previousHandPosition.z;
+                    camera.position.z += deltaZ * 10;
+                    
+                    // จำกัดระยะซูมไม่ให้ใกล้หรือไกลเกินไป
+                    if(camera.position.z < 3) camera.position.z = 3;
+                    if(camera.position.z > 10) camera.position.z = 10;
 
-    // ตั้งค่า AI
-    const hands = new Hands({locateFile: (file) => {
-      return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-    }});
-    
-    hands.setOptions({
-      maxNumHands: 1, 
-      modelComplexity: 1,
-      minDetectionConfidence: 0.6,
-      minTrackingConfidence: 0.6
-    });
-    hands.onResults(onResults);
+                    previousHandPosition = { x: indexTip.x, y: indexTip.y, z: indexTip.z };
+                    statusDiv.innerText = "กำลังจับและหมุนลูกโลก!";
+                } else {
+                    isGrabbing = false;
+                }
+            }
+        }
 
-    // เปิดกล้อง
-    const cameraFeed = new Camera(videoElement, {
-      onFrame: async () => {
-        await hands.send({image: videoElement});
-      },
-      width: 640,
-      height: 480
-    });
-    cameraFeed.start();
-  </script>
+        // ==========================================
+        // 3. ตั้งค่า MediaPipe และกล้อง
+        // ==========================================
+        const videoElement = document.getElementById('input_video');
+        const hands = new Hands({
+            locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+            }
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+        hands.onResults(onResults);
+
+        const cameraFeed = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({ image: videoElement });
+            },
+            width: 640,
+            height: 480
+        });
+        cameraFeed.start();
+
+        // ==========================================
+        // 4. ลูปเรนเดอร์ 3D
+        // ==========================================
+        function animate() {
+            requestAnimationFrame(animate);
+            // หมุนโลกช้าๆ อัตโนมัติเมื่อไม่ได้จับ
+            if (!isGrabbing) {
+                earth.rotation.y += 0.002;
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // ปรับขนาดหน้าจอเมื่อมีการย่อขยายเบราว์เซอร์
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
 </body>
 </html>
