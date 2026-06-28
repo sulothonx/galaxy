@@ -1,116 +1,155 @@
 <!DOCTYPE html>
-<html>
+<html lang="th">
 <head>
-  <base target="_top">
-  <meta charset="utf-8">
-  <title>Hand Tracking with MediaPipe</title>
-  
-  <!-- โหลดไลบรารี MediaPipe ของ Google ผ่าน CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-  
+  <meta charset="UTF-8">
+  <title>3D Hand Tracking Globe</title>
   <style>
-    body {
-      margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      background-color: #1e1e1e;
-      color: white;
+    body { 
+      margin: 0; 
+      overflow: hidden; /* ป้องกันการเลื่อนหน้าจอ */
+      background-color: #000; 
       font-family: sans-serif;
     }
-    h2 { margin-top: 20px; }
-    .container {
-      position: relative;
-      width: 640px;
-      height: 480px;
-      margin-top: 20px;
-      border: 2px solid #4CAF50;
-      border-radius: 10px;
-      overflow: hidden;
+    .input_video { 
+      display: none; /* ซ่อนวิดีโอจากกล้อง เพราะเราจะดูแค่ 3D */
     }
-    /* ซ่อนวิดีโอต้นฉบับ เราจะวาดทุกอย่างลงบน Canvas แทน */
-    .input_video { display: none; }
-    .output_canvas {
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
+    #canvas-container { 
+      width: 100vw; 
+      height: 100vh; 
     }
-    .loading {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      font-size: 1.2rem;
+    #loading { 
+      position: absolute; 
+      top: 50%; 
+      left: 50%; 
+      transform: translate(-50%, -50%); 
+      color: #00FF00; 
+      font-size: 1.5rem; 
+      text-align: center;
+      z-index: 10;
     }
   </style>
+  
+  <!-- โหลด MediaPipe สำหรับจับมือ -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  
+  <!-- โหลด Three.js สำหรับสร้าง 3D -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
-  <h2>Google Apps Script: Hand Tracking</h2>
-  
-  <div class="container">
-    <div class="loading" id="loadingText">กำลังเปิดกล้องและโหลดโมเดล AI...</div>
-    <video class="input_video"></video>
-    <canvas class="output_canvas" width="640px" height="480px"></canvas>
-  </div>
+  <div id="loading">กำลังโหลดโมเดลอวกาศและ AI...<br><span style="font-size: 1rem; color: #fff;">(กรุณาอนุญาตให้ใช้งานกล้อง)</span></div>
+  <video class="input_video"></video>
+  <div id="canvas-container"></div>
 
-  <script type="module">
+  <script>
+    // ==========================================
+    // ส่วนที่ 1: ตั้งค่าอวกาศ 3 มิติ (Three.js)
+    // ==========================================
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    
+    // สร้างกล้อง 3 มิติ
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    container.appendChild(renderer.domElement);
+
+    // สร้างลูกโลก
+    const geometry = new THREE.SphereGeometry(2, 64, 64);
+    const textureLoader = new THREE.TextureLoader();
+    // ดึงภาพแผนที่โลกมาแปะบนลูกทรงกลม
+    const earthTexture = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg');
+    const material = new THREE.MeshBasicMaterial({ map: earthTexture });
+    const globe = new THREE.Mesh(geometry, material);
+    scene.add(globe);
+
+    // สร้างดวงดาวพื้นหลัง (Galaxy)
+    const starsGeometry = new THREE.BufferGeometry();
+    const starsMaterial = new THREE.PointsMaterial({color: 0xFFFFFF, size: 0.05});
+    const starsVertices = [];
+    for(let i = 0; i < 2000; i++) {
+        const x = (Math.random() - 0.5) * 100;
+        const y = (Math.random() - 0.5) * 100;
+        const z = (Math.random() - 0.5) * 100;
+        starsVertices.push(x, y, z);
+    }
+    starsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starsVertices, 3));
+    const starField = new THREE.Points(starsGeometry, starsMaterial);
+    scene.add(starField);
+
+    // ค่าเริ่มต้นของการซูม (ระยะห่างกล้อง)
+    let targetZoom = 6;
+    camera.position.z = targetZoom;
+
+    // ฟังก์ชันสั่งให้โลกและอวกาศหมุนตลอดเวลา
+    function animate() {
+      requestAnimationFrame(animate);
+      globe.rotation.y += 0.002;
+      starField.rotation.y -= 0.0005;
+      
+      // ทำให้การซูมสมูทขึ้น (Lerp)
+      camera.position.z += (targetZoom - camera.position.z) * 0.1;
+      
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // ==========================================
+    // ส่วนที่ 2: ตั้งค่าจับการเคลื่อนไหวมือ (MediaPipe)
+    // ==========================================
     const videoElement = document.querySelector('.input_video');
-    const canvasElement = document.querySelector('.output_canvas');
-    const canvasCtx = canvasElement.getContext('2d');
-    const loadingText = document.getElementById('loadingText');
+    const loadingText = document.getElementById('loading');
 
-    // ฟังก์ชันนี้จะถูกเรียกเมื่อ AI ตรวจจับมือได้
     function onResults(results) {
-      // ปิดข้อความโหลดเมื่อภาพเริ่มมา
-      loadingText.style.display = 'none'; 
-      
-      canvasCtx.save();
-      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-      
-      // วาดภาพวิดีโอลงบน Canvas
-      canvasCtx.drawImage(
-          results.image, 0, 0, canvasElement.width, canvasElement.height);
-          
-      // ถ้าระบุตำแหน่งมือได้ (วาดจุดและเส้น)
-      if (results.multiHandLandmarks) {
-        for (const landmarks of results.multiHandLandmarks) {
-          drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS,
-                         {color: '#00FF00', lineWidth: 4}); // สีเขียวสำหรับเส้น
-          drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2}); // สีแดงสำหรับจุดข้อต่อ
-        }
+      // ซ่อนข้อความโหลดเมื่อกล้องและ AI ทำงานแล้ว
+      loadingText.style.display = 'none';
+
+      // ถ้าจับมือได้
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        const landmarks = results.multiHandLandmarks[0];
+        
+        // ดึงตำแหน่ง ปลายนิ้วโป้ง (จุดที่ 4) และ ปลายนิ้วชี้ (จุดที่ 8)
+        const thumbTip = landmarks[4];
+        const indexTip = landmarks[8];
+
+        // คำนวณระยะห่างระหว่างนิ้ว
+        const dx = thumbTip.x - indexTip.x;
+        const dy = thumbTip.y - indexTip.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        // แปลงระยะห่างนิ้วเป็นการซูม 
+        // distance ปกติจะมีค่า 0.0 (จีบนิ้วชิดกัน) ถึงประมาณ 0.3 (ถ่างนิ้วสุด)
+        let newZoom = 12 - (distance * 35); 
+        
+        // ล็อกระยะซูมไม่ให้ทะลุโลก หรือไกลเกินไป
+        if (newZoom < 2.5) newZoom = 2.5; 
+        if (newZoom > 12) newZoom = 12;
+        
+        targetZoom = newZoom;
       }
-      canvasCtx.restore();
     }
 
-    // ตั้งค่า MediaPipe Hands
     const hands = new Hands({locateFile: (file) => {
       return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
     }});
     
     hands.setOptions({
-      maxNumHands: 2, // จับมือได้สูงสุด 2 ข้าง
+      maxNumHands: 1, // ใช้มือเดียวสั่งการ
       modelComplexity: 1,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
     });
     hands.onResults(onResults);
 
-    // เปิดกล้องและส่งเฟรมภาพไปให้ AI ประมวลผล
-    const camera = new Camera(videoElement, {
+    const cameraFeed = new Camera(videoElement, {
       onFrame: async () => {
         await hands.send({image: videoElement});
       },
       width: 640,
       height: 480
     });
-    camera.start();
+    cameraFeed.start();
   </script>
 </body>
 </html>
