@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AR Nutri-Catch: ภารกิจพิชิตอาหาร 5 หมู่</title>
+  
+  <!-- นำเข้า AI ตรวจจับมือจาก MediaPipe -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      font-family: 'Kanit', sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #eef2f7;
+      color: #333;
+      text-align: center;
+    }
+    .container {
+      max-width: 700px;
+      margin: 20px auto;
+      padding: 15px;
+    }
+    h1 { color: #2c3e50; margin-bottom: 5px; }
+    .screen { display: none; background: white; padding: 30px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+    .active { display: block; }
+    
+    /* หน้าแรก */
+    .instruction-box { text-align: left; background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 5px solid #2ecc71; }
+    
+    /* หน้าเกม */
+    .hud { display: flex; justify-content: space-between; font-size: 20px; font-weight: bold; margin-bottom: 15px; background: #34495e; color: white; padding: 10px 20px; border-radius: 8px; }
+    .question-box { background: #fff; border: 2px solid #3498db; padding: 15px; border-radius: 10px; font-size: 22px; font-weight: 600; margin-bottom: 15px; color: #2c3e50; }
+    #canvas-container { position: relative; width: 100%; max-width: 640px; height: 480px; margin: 0 auto; background: #000; border-radius: 10px; overflow: hidden; }
+    canvas { position: absolute; top: 0; left: 0; z-index: 2; transform: scaleX(-1); /* กลับด้านกล้องให้เหมือนกระจก */ width: 100%; height: 100%; }
+    video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; transform: scaleX(-1); object-fit: cover; }
+    
+    button {
+      background: #2ecc71; color: white; border: none; padding: 12px 35px; font-size: 18px; font-weight: bold; border-radius: 25px; cursor: pointer; transition: 0.2s; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    button:hover { background: #27ae60; transform: translateY(-2px); }
+    .score-final { font-size: 48px; color: #e67e22; font-weight: bold; margin: 20px 0; }
+    #loading-text { font-size: 16px; color: #7f8c8d; margin-top: 15px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>🍎 AR Nutri-Catch 🥦</h1>
+  <p style="margin-top:0; color:#7f8c8d;">ภารกิจพิชิตอาหาร 5 หมู่ และสารอาหาร</p>
+
+  <!-- หน้าแรก: คำอธิบายเกม -->
+  <div id="screen-start" class="screen active">
+    <h2>วิธีเล่นเกม</h2>
+    <div class="instruction-box">
+      <p>1. อนุญาตให้เว็บเข้าถึง <b>"กล้องถ่ายรูป"</b> ของอุปกรณ์</p>
+      <p>2. อ่านโจทย์ด้านบน แล้วยื่นมือมาในกล้อง</p>
+      <p>3. ใช้ <b>"ปลายนิ้วชี้"</b> เล็งไปแตะรูปอาหารที่เป็นคำตอบที่ถูกต้อง</p>
+      <p>4. มีเวลาจำกัด <b>1 นาที (60 วินาที)</b></p>
+      <p style="color: #e74c3c;">⚠️ ตอบถูกได้ +1 คะแนน | ตอบผิดลบ -1 คะแนน</p>
+    </div>
+    <button onclick="startGame()">เริ่มเล่นเกมเลย!</button>
+    <div id="loading-text" style="display:none;">⏳ กำลังโหลดระบบ AI ตรวจจับมือ กรุณารอซักครู่...</div>
+  </div>
+
+  <!-- หน้าเล่นเกม -->
+  <div id="screen-game" class="screen">
+    <div class="hud">
+      <div>⏱️ เวลา: <span id="timer">60</span> วิ</div>
+      <div>⭐ คะแนน: <span id="score">0</span></div>
+    </div>
+    <div class="question-box" id="question-text">โจทย์กำลังโหลด...</div>
+    <div id="canvas-container">
+      <video id="webcam" autoplay playsinline></video>
+      <canvas id="gameCanvas" width="640" height="480"></canvas>
+    </div>
+  </div>
+
+  <!-- หน้าสรุปผล -->
+  <div id="screen-gameover" class="screen">
+    <h2>🏁 หมดเวลาแล้ว! 🏁</h2>
+    <p>คะแนนรวมที่คุณทำได้</p>
+    <div class="score-final" id="final-score">0</div>
+    <button onclick="restartGame()">เล่นอีกครั้ง</button>
+  </div>
+</div>
+
+<script>
+  // คลังข้อมูลอาหาร 5 หมู่และสารอาหาร
+  const foodDatabase = {
+    protein: { name: "หมู่ 1 โปรตีน", items: [{e:"🥩", n:"เนื้อ"}, {e:"🥚", n:"ไข่"}, {e:"🥛", n:"นม"}, {e:"🐟", n:"ปลา"}] },
+    carb: { name: "หมู่ 2 คาร์โบไฮเดรต", items: [{e:"🍞", n:"ขนมปัง"}, {e:"🍚", n:"ข้าว"}, {e:"🌽", n:"ข้าวโพด"}, {e:"🍠", n:"มันเทศ"}] },
+    vegetable: { name: "หมู่ 3 วิตามิน/แร่ธาตุจากผัก", items: [{e:"🥦", n:"บล็อคโคลี่"}, {e:"🥕", n:"แครอท"}, {e:"🍅", n:"มะเขือเทศ"}, {e:"🥬", n:"ผักกาด"}] },
+    fruit: { name: "หมู่ 4 วิตามินจากผลไม้", items: [{e:"🍎", n:"แอปเปิ้ล"}, {e:"🍌", n:"กล้วย"}, {e:"🍊", n:"ส้ม"}, {e:"🍉", n:"แตงโม"}] },
+    fat: { name: "หมู่ 5 ไขมัน", items: [{e:"🧈", n:"เนย"}, {e:"🫒", n:"น้ำมันมะกอก"}, {e:"🧀", n:"ชีส"}, {e:"🥥", n:"น้ำมันพร้าว"}] }
+  };
+
+  const questions = [
+    { q: "อาหารหมู่ใดช่วยซ่อมแซมส่วนที่สึกหรอของร่างกาย?", ans: "protein" },
+    { q: "สารอาหารประเภทใดให้พลังงานหลักแก่ร่างกายในแต่ละวัน?", ans: "carb" },
+    { q: "ข้อใดจัดอยู่ในอาหารหมู่ที่ 2 (คาร์โบไฮเดรต)?", ans: "carb" },
+    { q: "ถ้าต้องการวิตามินและแร่ธาตุเพื่อช่วยระบบขับถ่าย ควรเลือกข้อใด?", ans: "vegetable" },
+    { q: "อาหารในหมู่ใดให้ความอบอุ่นแก่ร่างกายและช่วยดูดซึมวิตามิน?", ans: "fat" },
+    { q: "ส้ม และ กล้วย จัดอยู่ในสารอาหารกลุ่มใด?", ans: "fruit" },
+    { q: "ไข่และเนื้อปลา จัดเป็นอาหารในหมู่ใด?", ans: "protein" }
+  ];
+
+  let score = 0;
+  let timeLeft = 60;
+  let gameInterval;
+  let currentQuestion = null;
+  let gameOptions = [];
+  let isCooldown = false;
+  let aiReady = false;
+
+  const videoElement = document.getElementById('webcam');
+  const canvasElement = document.getElementById('gameCanvas');
+  const canvasCtx = canvasElement.getContext('2d');
+
+  // ตัวเลือกพิกัดตำแหน่งสุ่มบนจอ (ซ้าย, กลาง, ขวา)
+  const positions = [
+    { x: 120, y: 200 },
+    { x: 320, y: 200 },
+    { x: 520, y: 200 }
+  ];
+
+  // ตั้งค่า MediaPipe Hands AI
+  const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+  hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+  hands.onResults(onHandResults);
+
+  const camera = new Camera(videoElement, {
+    onFrame: async () => { if(aiReady) await hands.send({image: videoElement}); },
+    width: 640, height: 480
+  });
+
+  function showScreen(screenId) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(screenId).classList.add('active');
+  }
+
+  function startGame() {
+    const loadingText = document.getElementById('loading-text');
+    loadingText.style.display = 'block';
+    loadingText.style.color = '#7f8c8d';
+    loadingText.innerText = '⏳ กำลังขออนุญาตเปิดกล้อง กรุณากด "อนุญาต (Allow)"...';
+    
+    // ลองขอสิทธิ์กล้อง
+    camera.start().then(() => {
+      loadingText.innerText = '⏳ กำลังโหลดระบบ AI ตรวจจับมือ... (อาจใช้เวลาซักครู่)';
+      aiReady = true;
+      showScreen('screen-game');
+      resetGameVariables();
+      nextQuestion();
+      gameInterval = setInterval(updateTimer, 1000);
+    }).catch(err => {
+      // หากเกิด Error จะแสดงข้อความสีแดงบนหน้าจอ
+      loadingText.style.color = '#e74c3c';
+      loadingText.innerHTML = `<b>❌ ไม่สามารถเปิดกล้องได้</b><br>สาเหตุ: ${err.message}<br>1. โปรดตรวจสอบว่าเบราว์เซอร์ไม่ได้บล็อกกล้อง (ดูที่ไอคอนแม่กุญแจบนแถบ URL)<br>2. หากเล่นในมือถือ กรุณาเปิดผ่านเบราว์เซอร์ Chrome หรือ Safari โดยตรง (ไม่เปิดผ่านแอปพลิเคชัน Line หรือ Facebook)`;
+    });
+  }
+
+  function resetGameVariables() {
+    score = 0;
+    timeLeft = 60;
+    document.getElementById('score').innerText = score;
+    document.getElementById('timer').innerText = timeLeft;
+  }
+
+  function updateTimer() {
+    timeLeft--;
+    document.getElementById('timer').innerText = timeLeft;
+    if (timeLeft <= 0) {
+      endGame();
+    }
+  }
+
+  function nextQuestion() {
+    isCooldown = false;
+    currentQuestion = questions[Math.floor(Math.random() * questions.length)];
+    document.getElementById('question-text').innerText = "โจทย์: " + currentQuestion.q;
+
+    let types = Object.keys(foodDatabase);
+    let correctType = currentQuestion.ans;
+    let wrongTypes = types.filter(t => t !== correctType).sort(() => 0.5 - Math.random()).slice(0, 2);
+    
+    let selectedTypes = [correctType, ...wrongTypes].sort(() => 0.5 - Math.random());
+    
+    gameOptions = selectedTypes.map((type, index) => {
+      let itemsInType = foodDatabase[type].items;
+      let randomItem = itemsInType[Math.floor(Math.random() * itemsInType.length)];
+      return {
+        type: type,
+        emoji: randomItem.e,
+        name: randomItem.n,
+        x: positions[index].x,
+        y: positions[index].y,
+        radius: 50,
+        isCorrect: type === correctType,
+        status: 'normal'
+      };
+    });
+  }
+
+  function onHandResults(results) {
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    
+    gameOptions.forEach(opt => {
+      canvasCtx.save();
+      canvasCtx.beginPath();
+      canvasCtx.arc(opt.x, opt.y, opt.radius, 0, 2 * Math.PI);
+      if(opt.status === 'correct') canvasCtx.fillStyle = 'rgba(46, 204, 113, 0.9)';
+      else if(opt.status === 'wrong') canvasCtx.fillStyle = 'rgba(231, 76, 60, 0.9)';
+      else canvasCtx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      canvasCtx.fill();
+      canvasCtx.lineWidth = 3;
+      canvasCtx.strokeStyle = '#34495e';
+      canvasCtx.stroke();
+      
+      canvasCtx.font = "50px Arial";
+      canvasCtx.textAlign = "center";
+      canvasCtx.textBaseline = "middle";
+      canvasCtx.fillText(opt.emoji, opt.x, opt.y - 5);
+      
+      canvasCtx.font = "bold 16px Kanit";
+      canvasCtx.fillStyle = "#2c3e50";
+      canvasCtx.fillText(opt.name, opt.x, opt.y + 35);
+      canvasCtx.restore();
+    });
+
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      const landmarks = results.multiHandLandmarks[0];
+      const indexFingerTip = landmarks[8]; 
+      
+      const fingerX = indexFingerTip.x * canvasElement.width;
+      const fingerY = indexFingerTip.y * canvasElement.height;
+
+      canvasCtx.beginPath();
+      canvasCtx.arc(fingerX, fingerY, 15, 0, 2 * Math.PI);
+      canvasCtx.fillStyle = 'rgba(230, 126, 34, 0.9)';
+      canvasCtx.fill();
+      canvasCtx.strokeStyle = 'white';
+      canvasCtx.lineWidth = 2;
+      canvasCtx.stroke();
+
+      if (!isCooldown) {
+        const mirroredFingerX = canvasElement.width - fingerX;
+
+        gameOptions.forEach(opt => {
+          let dist = Math.hypot(opt.x - mirroredFingerX, opt.y - fingerY);
+          if (dist < opt.radius + 15) { 
+            checkAnswer(opt);
+          }
+        });
+      }
+    }
+  }
+
+  function checkAnswer(selectedOption) {
+    isCooldown = true;
+    if (selectedOption.isCorrect) {
+      selectedOption.status = 'correct';
+      score += 1;
+      document.getElementById('score').innerText = score;
+      setTimeout(nextQuestion, 800);
+    } else {
+      selectedOption.status = 'wrong';
+      if(score > 0) score -= 1; 
+      document.getElementById('score').innerText = score;
+      setTimeout(() => { isCooldown = false; selectedOption.status = 'normal'; }, 1000);
+    }
+  }
+
+  function endGame() {
+    clearInterval(gameInterval);
+    aiReady = false;
+    showScreen('screen-gameover');
+    document.getElementById('final-score').innerText = score;
+  }
+
+  function restartGame() {
+    showScreen('screen-start');
+  }
+</script>
+
+</body>
+</html>
