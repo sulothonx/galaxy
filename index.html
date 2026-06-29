@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Solar System Hand Tracking</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        #canvas-container { width: 100vw; height: 100vh; }
+        #ui { position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: center; gap: 10px; }
+        button { padding: 10px 20px; cursor: pointer; background: #333; color: white; border: 1px solid #555; border-radius: 5px; }
+        #status { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+</head>
+<body>
+    <div id="status">กำลังโหลดระบบ...</div>
+    <div id="ui">
+        <button onclick="changePlanet(-1)">ก่อนหน้า</button>
+        <button onclick="changePlanet(1)">ถัดไป</button>
+    </div>
+    <div id="canvas-container"></div>
+    <video id="input_video" style="display:none"></video>
+
+    <script>
+        // 1. ตั้งค่าข้อมูลดาวเคราะห์
+        const planetsData = [
+            { name: "โลก", color: 0x0000ff },
+            { name: "ดาวอังคาร", color: 0xff4500 },
+            { name: "ดาวพฤหัส", color: 0xffd700 },
+            { name: "ดาวเสาร์", color: 0xffefd5 }
+        ];
+        let currentPlanetIndex = 0;
+
+        // 2. Setup Three.js
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        let currentMesh = new THREE.Mesh(new THREE.SphereGeometry(2, 32, 32), new THREE.MeshStandardMaterial({ color: planetsData[0].color }));
+        scene.add(currentMesh);
+
+        const light = new THREE.PointLight(0xffffff, 1);
+        light.position.set(5, 5, 5);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0x404040));
+        camera.position.z = 6;
+
+        // 3. ฟังก์ชันเปลี่ยนดาว
+        function changePlanet(dir) {
+            scene.remove(currentMesh);
+            currentPlanetIndex = (currentPlanetIndex + dir + planetsData.length) % planetsData.length;
+            currentMesh = new THREE.Mesh(new THREE.SphereGeometry(2, 32, 32), new THREE.MeshStandardMaterial({ color: planetsData[currentPlanetIndex].color }));
+            scene.add(currentMesh);
+        }
+
+        // 4. Hand Tracking Logic
+        let lastX = 0;
+        function onResults(results) {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const hand = results.multiHandLandmarks[0];
+                const indexTip = hand[8]; // ปลายนิ้วชี้
+
+                // ตรวจจับการปัด (Swipe Left/Right)
+                if (Math.abs(indexTip.x - lastX) > 0.3) {
+                    if (indexTip.x > lastX) changePlanet(-1); // ปัดขวา
+                    else changePlanet(1); // ปัดซ้าย
+                    lastX = indexTip.x;
+                }
+                
+                // หมุนตามมือ
+                currentMesh.rotation.y = (indexTip.x - 0.5) * 4;
+                currentMesh.rotation.x = (indexTip.y - 0.5) * 4;
+                
+                lastX = indexTip.x;
+            }
+        }
+
+        // 5. MediaPipe Init
+        const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+        hands.setOptions({ maxNumHands: 1, minDetectionConfidence: 0.7 });
+        hands.onResults(onResults);
+
+        const cameraFeed = new Camera(document.getElementById('input_video'), {
+            onFrame: async () => { await hands.send({ image: document.getElementById('input_video') }); },
+            width: 640, height: 480
+        });
+        cameraFeed.start();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
